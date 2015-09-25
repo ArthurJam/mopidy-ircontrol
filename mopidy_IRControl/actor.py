@@ -6,13 +6,12 @@ import tempfile
 from time import sleep
 
 from mopidy.core import PlaybackState
-from mopidy.utils import process
+from mopidy.internal import process
 from mopidy.core import CoreListener
 
 logger = logging.getLogger('mopidy_IRControl')
 
 LIRC_PROG_NAME = "mopidyIRControl"
-
 
 class Event(list):
     """Event subscription.
@@ -32,15 +31,14 @@ class CommandDispatcher(object):
         self.core = core
         self._handlers = {}
         self.registerHandler('playpause', self._playpauseHandler)
+        self.registerHandler('play', self._playHandler)
+        self.registerHandler('pause', lambda: self.core.playback.pause().get())
         self.registerHandler('mute', self._muteHandler)
         self.registerHandler('stop', lambda: self.core.playback.stop().get())
         self.registerHandler('next', lambda: self.core.playback.next().get())
-        self.registerHandler('previous',
-                             lambda: self.core.playback.previous().get())
-        self.registerHandler('volumedown',
-                             self._volumeFunction(lambda vol: vol - 5))
-        self.registerHandler('volumeup',
-                             self._volumeFunction(lambda vol: vol + 5))
+        self.registerHandler('previous', lambda: self.core.playback.previous().get())
+        self.registerHandler('volumedown', self._volumeFunction(lambda vol: vol - 5))
+        self.registerHandler('volumeup',self._volumeFunction(lambda vol: vol + 5))
         buttonPressEvent.append(self.handleCommand)
 
     def handleCommand(self, cmd):
@@ -53,6 +51,13 @@ class CommandDispatcher(object):
     def registerHandler(self, cmd, handler):
         self._handlers[cmd] = handler
 
+    def _playHandler(self):
+        state = self.core.playback.state.get()
+        if(state == PlaybackState.PAUSED):
+            self.core.playback.resume().get()
+        elif (state == PlaybackState.STOPPED):
+            self.core.playback.play().get()
+
     def _playpauseHandler(self):
         state = self.core.playback.state.get()
         if(state == PlaybackState.PAUSED):
@@ -63,7 +68,7 @@ class CommandDispatcher(object):
             self.core.playback.play().get()
 
     def _muteHandler(self):
-        self.core.playback.mute = not self.core.playback.mute.get()
+        self.core.mixer.set_volume(0 if self.core.mixer.get_volume() > 0 else 100)
 
     def _volumeFunction(self, changeFct):
         def volumeChange():
@@ -136,7 +141,8 @@ class IRControlFrontend(pykka.ThreadingActor, CoreListener):
         self.thread.join()
 
     def handleButtonPress(self, cmd):
-        CoreListener.send("IRButtonPressed", button=cmd)
+        # CoreListener.send(IRControlFrontend, button=cmd)
+        self.dispatcher.handleCommand(cmd)
 
     def generateLircConfigFile(self, config):
         '''Returns file name of generate config file for pylirc'''
